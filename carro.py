@@ -1,164 +1,139 @@
-# ===============================================
-# JOGO DE CORRIDA ASCII - VERSÃO ORIGINAL
-# Autor: Jacques Bernard (2025)
-# Linguagem: Python 3
-# -----------------------------------------------
-# Conceito: O jogador controla um carro em uma
-# estrada gerada proceduralmente. O cenário rola,
-# aparecem obstáculos, e o placar aumenta.
-# ===============================================
-
 import os
-import time
 import random
-import sys
-import shutil
-import threading
+import time
+import msvcrt  # Pour Windows (permet de lire les touches sans appuyer sur Entrée)
 
-IS_WINDOWS = sys.platform.startswith("win")
-if IS_WINDOWS:
-    import msvcrt
-else:
-    import termios, tty, select
+# Dimensions du jeu
+HAUTEUR = 20
+LARGEUR = 15
 
-# ----------------------------------------------------
-# Classe utilitária para capturar as teclas em tempo real
-# ----------------------------------------------------
-class Teclado:
-    def __init__(self):
-        self.tecla = None
-        self.ativo = True
-        self.thread = threading.Thread(target=self._escutar, daemon=True)
-        self.thread.start()
+# Symboles du jeu
+VIDE = " "
+JOUEUR = "▲"
+ENNEMI = "V"
+BORDE = "|"
 
-    def _escutar(self):
-        if IS_WINDOWS:
-            while self.ativo:
-                if msvcrt.kbhit():
-                    self.tecla = msvcrt.getwch()
-        else:
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            tty.setcbreak(fd)
-            while self.ativo:
-                dr, _, _ = select.select([sys.stdin], [], [], 0)
-                if dr:
-                    self.tecla = sys.stdin.read(1)
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+# Position initiale du joueur (au centre en bas)
+pos_joueur = [HAUTEUR - 2, LARGEUR // 2]
 
-    def ler(self):
-        t = self.tecla
-        self.tecla = None
-        return t
-
-    def parar(self):
-        self.ativo = False
+# Liste d'ennemis (positions)
+ennemis = []
+score = 0
+vitesse = 0.15  # temps entre deux rafraîchissements
 
 
-# ----------------------------------------------------
-# Classe principal do jogo de corrida em ASCII
-# ----------------------------------------------------
-class CorridaASCII:
-    def __init__(self):
-        self.cols, self.rows = shutil.get_terminal_size(fallback=(80, 24))
-        self.largura_estrada = 30
-        self.posicao = self.largura_estrada // 2
-        self.velocidade = 0.05
-        self.pontuacao = 0
-        self.vidas = 3
-        self.obstaculos = []
-        self.tempo_inicio = time.time()
-        self.jogando = True
-        self.teclado = Teclado()
-
-    def limpar_tela(self):
-        os.system('cls' if IS_WINDOWS else 'clear')
-
-    def gerar_estrada(self):
-        # Retorna uma linha ASCII representando a estrada
-        margem = (self.cols - self.largura_estrada) // 2
-        esquerda = "|"
-        direita = "|"
-        interior = [" " for _ in range(self.largura_estrada - 2)]
-
-        # Adiciona obstáculo aleatório
-        if random.random() < 0.15:
-            pos_obs = random.randint(1, self.largura_estrada - 3)
-            interior[pos_obs] = "X"
-            self.obstaculos.append(pos_obs)
-
-        return " " * margem + esquerda + "".join(interior) + direita
-
-    def desenhar_carro(self, linha, pos):
-        # Desenha o carro do jogador (A)
-        margem = (self.cols - self.largura_estrada) // 2
-        l = list(linha)
-        x = margem + pos
-        if 0 <= x < len(l):
-            l[x] = "A"
-        return "".join(l)
-
-    def atualizar(self):
-        tecla = self.teclado.ler()
-        if tecla:
-            if tecla in ['a', 'A', '\x1b[D']:
-                self.posicao -= 1
-            elif tecla in ['d', 'D', '\x1b[C']:
-                self.posicao += 1
-            elif tecla in ['q', 'Q']:
-                self.jogando = False
-
-        self.posicao = max(1, min(self.largura_estrada - 2, self.posicao))
-
-    def loop_principal(self):
-        estrada = [" " * self.cols for _ in range(self.rows - 5)]
-
-        while self.jogando and self.vidas > 0:
-            self.atualizar()
-            nova = self.gerar_estrada()
-            estrada.append(nova)
-            if len(estrada) > self.rows - 5:
-                estrada.pop(0)
-
-            # Verifica colisão
-            if len(self.obstaculos) > 0:
-                if random.random() < 0.25 and self.posicao in self.obstaculos:
-                    self.vidas -= 1
-                    self.obstaculos.clear()
-                    if self.vidas <= 0:
-                        break
-
-            # Exibe na tela
-            self.limpar_tela()
-            print("╔" + "═" * (self.cols - 2) + "╗")
-            print(f" Pontuação: {self.pontuacao:05d} | Vidas: {self.vidas} | Use 'A'/'D' para mover | 'Q' para sair ")
-            print("╠" + "═" * (self.cols - 2) + "╣")
-
-            for i, linha in enumerate(estrada):
-                if i == len(estrada) - 2:
-                    print(self.desenhar_carro(linha, self.posicao))
-                else:
-                    print(linha)
-
-            print("╚" + "═" * (self.cols - 2) + "╝")
-
-            self.pontuacao += 1
-            time.sleep(self.velocidade)
-
-        self.teclado.parar()
-        self.fim_de_jogo()
-
-    def fim_de_jogo(self):
-        self.limpar_tela()
-        print("\n" * (self.rows // 3))
-        print(" " * ((self.cols // 2) - 10) + "💥 FIM DE JOGO 💥")
-        print(" " * ((self.cols // 2) - 10) + f"Pontuação final: {self.pontuacao}")
-        print(" " * ((self.cols // 2) - 10) + "Obrigado por jogar!\n")
+def nettoyer_ecran():
+    """Efface le terminal (Windows ou Linux)"""
+    os.system('cls' if os.name == 'nt' else 'clear')
 
 
-# ----------------------------------------------------
-# Execução do jogo
-# ----------------------------------------------------
+def afficher(grille):
+    """Affiche la matrice du jeu"""
+    for ligne in grille:
+        print("".join(ligne))
+    print(f"\nScore : {score}")
+
+
+def creer_grille():
+    """Crée une grille vide avec les bordures de la piste"""
+    grille = []
+    for i in range(HAUTEUR):
+        ligne = []
+        for j in range(LARGEUR):
+            if j == 0 or j == LARGEUR - 1:
+                ligne.append(BORDE)
+            else:
+                ligne.append(VIDE)
+        grille.append(ligne)
+    return grille
+
+
+def ajouter_ennemi():
+    """Ajoute un ennemi en haut de la piste à une position aléatoire"""
+    x = 1  # première ligne jouable
+    y = random.randint(1, LARGEUR - 2)
+    ennemis.append([x, y])
+
+
+def deplacer_ennemis():
+    """Fait descendre les ennemis"""
+    global ennemis
+    for e in ennemis:
+        e[0] += 1
+    # Supprime ceux qui sortent de l’écran
+    ennemis = [e for e in ennemis if e[0] < HAUTEUR - 1]
+
+
+def maj_grille():
+    """Met à jour le contenu de la grille"""
+    grille = creer_grille()
+
+    # Placer le joueur
+    grille[pos_joueur[0]][pos_joueur[1]] = JOUEUR
+
+    # Placer les ennemis
+    for e in ennemis:
+        if 0 <= e[0] < HAUTEUR and 0 <= e[1] < LARGEUR:
+            grille[e[0]][e[1]] = ENNEMI
+    return grille
+
+
+def verifier_collision():
+    """Vérifie si un ennemi touche le joueur"""
+    for e in ennemis:
+        if e[0] == pos_joueur[0] and e[1] == pos_joueur[1]:
+            return True
+    return False
+
+
+def lire_touche():
+    """Lit une touche sans bloquer le programme"""
+    if msvcrt.kbhit():
+        return msvcrt.getch().decode('utf-8').lower()
+    return None
+
+
+def main():
+    global score, vitesse
+
+    # Boucle principale
+    iterations = 0
+    while True:
+        nettoyer_ecran()
+
+        # Ajout d’un ennemi aléatoirement
+        if iterations % 8 == 0:
+            ajouter_ennemi()
+
+        # Déplacement des ennemis
+        deplacer_ennemis()
+
+        # Déplacement du joueur
+        touche = lire_touche()
+        if touche == 'a' and pos_joueur[1] > 1:
+            pos_joueur[1] -= 1
+        elif touche == 'd' and pos_joueur[1] < LARGEUR - 2:
+            pos_joueur[1] += 1
+        elif touche == '\x1b':  # Touche ÉCHAP
+            print("Jeu terminé par le joueur.")
+            break
+
+        # Mise à jour du score
+        score += 1
+
+        # Affichage
+        grille = maj_grille()
+        afficher(grille)
+
+        # Vérifie la collision
+        if verifier_collision():
+            print("\n💥 Collision ! Fin du jeu 💥")
+            break
+
+        time.sleep(vitesse)
+        iterations += 1
+
+
 if __name__ == "__main__":
-    jogo = CorridaASCII()
-    jogo.loop_principal()
+    main()
+
